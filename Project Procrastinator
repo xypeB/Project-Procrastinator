@@ -1,0 +1,567 @@
+#include <iostream>
+#include <vector>
+#include <string>
+#include <unordered_map>
+#include <stack>
+#include <queue>
+#include <limits>
+#include <iomanip>
+#include <ctime>
+
+using namespace std;
+
+struct Event {
+    int id;
+    string title;
+    int year, month, day;
+    int hour, minute;
+    int priority;
+    string description;
+    bool active;
+
+    Event() : id(-1), year(0), month(0), day(0), hour(0), minute(0),
+              priority(0), active(true) {}
+};
+
+struct BSTNode {
+    int idx; 
+    BSTNode* left;
+    BSTNode* right;
+    BSTNode(int i) : idx(i), left(nullptr), right(nullptr) {}
+};
+
+class CalendarSystem {
+private:
+    vector<Event> events;                       
+    unordered_map<string, int> titleToIndex;    
+    vector<vector<int>> graph;                   
+    BSTNode* bstRoot = nullptr;                 
+    stack<pair<string, int>> undoStack;         
+
+public:
+    CalendarSystem() {}
+
+    string toLower(const string& s) const {
+        string t = s;
+        for (char& c : t) c = (char)tolower(c);
+        return t;
+    }
+
+    bool earlier(int a, int b) const {
+        const Event& ea = events[a];
+        const Event& eb = events[b];
+        if (ea.year != eb.year) return ea.year < eb.year;
+        if (ea.month != eb.month) return ea.month < eb.month;
+        if (ea.day != eb.day) return ea.day < eb.day;
+        if (ea.hour != eb.hour) return ea.hour < eb.hour;
+        return ea.minute < eb.minute;
+    }
+
+    void deleteBST(BSTNode* node) {
+        if (!node) return;
+        deleteBST(node->left);
+        deleteBST(node->right);
+        delete node;
+    }
+
+    BSTNode* insertBST(BSTNode* node, int idx) {
+        if (!node) return new BSTNode(idx);
+        if (earlier(idx, node->idx)) {
+            node->left = insertBST(node->left, idx);
+        } else {
+            node->right = insertBST(node->right, idx);
+        }
+        return node;
+    }
+
+    void inorderPrint(BSTNode* node) const {
+        if (!node) return;
+        inorderPrint(node->left);
+        const Event& e = events[node->idx];
+        if (e.active) {
+            printEvent(e);
+        }
+        inorderPrint(node->right);
+    }
+
+    void rebuildBST() {
+        deleteBST(bstRoot);
+        bstRoot = nullptr;
+        for (int i = 0; i < (int)events.size(); ++i) {
+            if (events[i].active) {
+                bstRoot = insertBST(bstRoot, i);
+            }
+        }
+    }
+
+    void printEvent(const Event& e) const {
+        cout << "ID: " << e.id << "\n";
+        cout << "Title: " << e.title << "\n";
+        cout << "Date: " << e.year << "-" << e.month << "-" << e.day << "\n";
+        cout << "Time: " << (e.hour < 10 ? "0" : "") << e.hour << ":"
+             << (e.minute < 10 ? "0" : "") << e.minute << "\n";
+        cout << "Priority (1=high, 5=low): " << e.priority << "\n";
+        cout << "Description: " << e.description << "\n";
+        cout << "------------------------\n";
+    }
+
+    void addEvent() {
+        Event e;
+        e.id = (int)events.size();
+        cout << "Enter title: ";
+        cin.ignore(numeric_limits<streamsize>::max(), '\n');
+        getline(cin, e.title);
+
+        cout << "Enter year (e.g. 2025): ";
+        cin >> e.year;
+        cout << "Enter month (1-12): ";
+        cin >> e.month;
+        cout << "Enter day (1-31): ";
+        cin >> e.day;
+
+        cout << "Enter hour (0-23): ";
+        cin >> e.hour;
+        cout << "Enter minute (0-59): ";
+        cin >> e.minute;
+
+        cout << "Enter priority (1 = high, 5 = low): ";
+        cin >> e.priority;
+
+        cout << "Enter description: ";
+        cin.ignore(numeric_limits<streamsize>::max(), '\n');
+        getline(cin, e.description);
+
+        e.active = true;
+
+        if ((int)graph.size() <= e.id) {
+            graph.resize(e.id + 1);
+        }
+
+        events.push_back(e);
+        titleToIndex[toLower(e.title)] = e.id;
+
+        undoStack.push(make_pair(string("add"), e.id));
+
+        rebuildBST();
+
+        cout << "Event added.\n";
+    }
+
+    void deleteEvent() {
+        cout << "Enter title of event to delete: ";
+        cin.ignore(numeric_limits<streamsize>::max(), '\n');
+        string title;
+        getline(cin, title);
+        string key = toLower(title);
+
+        auto it = titleToIndex.find(key);
+        if (it == titleToIndex.end()) {
+            cout << "Event not found.\n";
+            return;
+        }
+        int idx = it->second;
+        if (!events[idx].active) {
+            cout << "Event already deleted.\n";
+            return;
+        }
+        events[idx].active = false;
+        titleToIndex.erase(it);
+
+        undoStack.push(make_pair(string("delete"), idx));
+
+        rebuildBST();
+        cout << "Event deleted.\n";
+    }
+
+    void undoLast() {
+        if (undoStack.empty()) {
+            cout << "Nothing to undo.\n";
+            return;
+        }
+        pair<string,int> top = undoStack.top();
+        undoStack.pop();
+
+        string op = top.first;
+        int idx = top.second;
+
+        if (idx < 0 || idx >= (int)events.size()) {
+            cout << "Invalid undo.\n";
+            return;
+        }
+
+        Event& e = events[idx];
+        string key = toLower(e.title);
+
+        if (op == "add") {
+            if (e.active) {
+                e.active = false;
+                titleToIndex.erase(key);
+                cout << "Undo: event add reverted.\n";
+            } else {
+                cout << "Undo error: event already inactive.\n";
+            }
+        } else if (op == "delete") {
+            if (!e.active) {
+                e.active = true;
+                titleToIndex[key] = idx;
+                cout << "Undo: event delete reverted.\n";
+            } else {
+                cout << "Undo error: event already active.\n";
+            }
+        }
+
+        rebuildBST();
+    }
+
+    void viewEventsOnDate() const {
+        int y, m, d;
+        cout << "Enter year: ";
+        cin >> y;
+        cout << "Enter month: ";
+        cin >> m;
+        cout << "Enter day: ";
+        cin >> d;
+
+        bool found = false;
+        for (const auto& e : events) {
+            if (e.active && e.year == y && e.month == m && e.day == d) {
+                printEvent(e);
+                found = true;
+            }
+        }
+        if (!found) {
+            cout << "No events on this date.\n";
+        }
+    }
+
+    void viewAllEvents() const {
+        bool found = false;
+        for (const auto& e : events) {
+            if (e.active) {
+                printEvent(e);
+                found = true;
+            }
+        }
+        if (!found) {
+            cout << "No events.\n";
+        }
+    }
+
+    void viewEventsSortedByDate() {
+        if (!bstRoot) {
+            cout << "No events.\n";
+            return;
+        }
+        cout << "Events sorted by date:\n";
+        inorderPrint(bstRoot);
+    }
+
+    void searchByTitle() const {
+        cout << "Enter title to search: ";
+        cin.ignore(numeric_limits<streamsize>::max(), '\n');
+        string title;
+        getline(cin, title);
+        string key = toLower(title);
+
+        auto it = titleToIndex.find(key);
+        if (it == titleToIndex.end()) {
+            cout << "Event not found.\n";
+            return;
+        }
+        const Event& e = events[it->second];
+        if (!e.active) {
+            cout << "Event not found (inactive).\n";
+            return;
+        }
+        printEvent(e);
+    }
+
+    void buildAndShowUpcoming() {
+        vector<int> idxs;
+        for (int i = 0; i < (int)events.size(); ++i) {
+            if (events[i].active) idxs.push_back(i);
+        }
+        if (idxs.empty()) {
+            cout << "No events.\n";
+            return;
+        }
+
+        for (int i = 1; i < (int)idxs.size(); ++i) {
+            int key = idxs[i];
+            int j = i - 1;
+            while (j >= 0 && earlier(key, idxs[j])) {
+                idxs[j + 1] = idxs[j];
+                j--;
+            }
+            idxs[j + 1] = key;
+        }
+
+        queue<int> q;
+        for (int idx : idxs) {
+            q.push(idx);
+        }
+
+        cout << "Upcoming events (soonest first):\n";
+        while (!q.empty()) {
+            int idx = q.front();
+            q.pop();
+            printEvent(events[idx]);
+        }
+    }
+
+    void addDependency() {
+        cout << "Enter title of prerequisite event: ";
+        cin.ignore(numeric_limits<streamsize>::max(), '\n');
+        string t1, t2;
+        getline(cin, t1);
+        cout << "Enter title of dependent event: ";
+        getline(cin, t2);
+
+        int a = titleLookupIndex(t1);
+        int b = titleLookupIndex(t2);
+
+        if (a == -1 || b == -1) {
+            cout << "One or both events not found.\n";
+            return;
+        }
+        if (a >= (int)graph.size() || b >= (int)graph.size()) {
+            cout << "Internal graph error.\n";
+            return;
+        }
+
+        graph[a].push_back(b);
+        cout << "Dependency added: \"" << t1 << "\" -> \"" << t2 << "\"\n";
+    }
+
+    int titleLookupIndex(const string& title) const {
+        string key = "";
+        for (char c : title) key.push_back((char)tolower(c));
+        auto it = titleToIndex.find(key);
+        if (it == titleToIndex.end()) return -1;
+        return it->second;
+    }
+
+    void showDependenciesBFS() const {
+        cout << "Enter title of starting event: ";
+        cin.ignore(numeric_limits<streamsize>::max(), '\n');
+        string t;
+        getline(cin, t);
+        int start = titleLookupIndex(t);
+        if (start == -1) {
+            cout << "Event not found.\n";
+            return;
+        }
+        if (start >= (int)graph.size()) {
+            cout << "No dependencies recorded.\n";
+            return;
+        }
+
+        vector<bool> visited(events.size(), false);
+        queue<int> q;
+        q.push(start);
+        visited[start] = true;
+
+        cout << "Dependency chain starting from \"" << t << "\":\n";
+
+        while (!q.empty()) {
+            int u = q.front();
+            q.pop();
+            if (u < 0 || u >= (int)events.size()) continue;
+            if (!events[u].active) continue;
+
+            printEvent(events[u]);
+
+            if (u >= (int)graph.size()) continue;
+            for (int v : graph[u]) {
+                if (v >= 0 && v < (int)events.size() && !visited[v]) {
+                    visited[v] = true;
+                    q.push(v);
+                }
+            }
+        }
+    }
+
+    // ---------- Visualizing Days ----------
+
+    bool hasEventOn(int year, int month, int day) const {
+        for (const auto& e : events) {
+            if (e.active && e.year == year && e.month == month && e.day == day) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Get highest priority (lowest number) on a given date
+    int highestPriorityOnDay(int year, int month, int day) const {
+        int best = 999;
+        for (const auto& e : events) {
+            if (e.active && e.year == year && e.month == month && e.day == day) {
+                if (e.priority < best) best = e.priority;
+            }
+        }
+        return (best == 999 ? -1 : best);
+    }
+
+    // number of days in a month 
+    int daysInMonth(int year, int month) const {
+        switch (month) {
+            case 1: 
+            case 3:
+            case 5:
+            case 7:
+            case 8: 
+            case 10: 
+            case 12:
+                return 31;
+            case 4:
+            case 6:
+            case 9: 
+            case 11:
+                return 30;
+            case 2:
+                if ((year % 400 == 0) || (year % 4 == 0 && year % 100 != 0))
+                    return 29;
+                else
+                    return 28;
+            default:
+                return 30;
+        }
+    }
+
+    void showMonthView() const {
+        int year, month;
+        cout << "Enter year (e.g. 2025): ";
+        cin >> year;
+        cout << "Enter month (1-12): ";
+        cin >> month;
+
+        if (month < 1 || month > 12) {
+            cout << "Invalid month.\n";
+            return;
+        }
+
+        int ndays = daysInMonth(year, month);
+
+        // Use <ctime> to find day of week of the 1st
+        tm t = {};
+        t.tm_year = year - 1900; // years since 1900
+        t.tm_mon  = month - 1;   // 0-11
+        t.tm_mday = 1;           // 1st day
+        mktime(&t);
+        int wday = t.tm_wday;    // 0 = Sunday, 6 = Saturday
+
+        cout << "\n    " << year << "-" << month << "\n";
+        cout << "Su Mo Tu We Th Fr Sa\n";
+
+        for (int i = 0; i < wday; ++i) {
+            cout << "   ";
+        }
+
+        //each day with color
+        for (int day = 1; day <= ndays; ++day) {
+            int p = highestPriorityOnDay(year, month, day);
+
+            if (p != -1) {
+                string color;
+                switch (p) {
+                    case 1: color = "\033[31m"; break; // red
+                    case 2: color = "\033[33m"; break; // yellow
+                    case 3: color = "\033[32m"; break; // green
+                    case 4: color = "\033[36m"; break; // cyan
+                    case 5: color = "\033[35m"; break; // magenta
+                    default: color = "\033[0m"; break;
+                }
+                cout << color << setw(2) << day << "\033[0m ";
+            } else {
+                cout << setw(2) << day << " ";
+            }
+
+            wday++;
+            if (wday > 6) {
+                wday = 0;
+                cout << "\n";
+            }
+        }
+        cout << "\n";
+
+        while (true) {
+            int chosenDay;
+            cout << "\nEnter a day number to view events (0 to go back): ";
+            cin >> chosenDay;
+
+            if (!cin) {
+                cin.clear();
+                cin.ignore(numeric_limits<streamsize>::max(), '\n');
+                cout << "Invalid input.\n";
+                continue;
+            }
+
+            if (chosenDay == 0) break;
+
+            if (chosenDay < 1 || chosenDay > ndays) {
+                cout << "That day is not in this month.\n";
+                continue;
+            }
+
+            bool found = false;
+            for (const auto& e : events) {
+                if (e.active && e.year == year && e.month == month && e.day == chosenDay) {
+                    if (!found) {
+                        cout << "\nEvents on " << year << "-" << month << "-" << chosenDay << ":\n";
+                        cout << "---------------------------------\n";
+                    }
+                    printEvent(e);
+                    found = true;
+                }
+            }
+
+            if (!found) {
+                cout << "No events on that day.\n";
+            }
+        }
+    }
+
+    void menu() {
+        int choice = -1;
+        while (choice != 0) {
+            cout << "\n=== Project Procrastinator ===\n";
+            cout << "1. Add event\n";
+            cout << "2. Delete event\n";
+            cout << "3. View events on a date\n";
+            cout << "4. View all events\n";
+            cout << "5. View events sorted by date\n";
+            cout << "6. Search event by title\n";
+            cout << "7. Show upcoming events\n";
+            cout << "8. Add dependency between events\n";
+            cout << "9. Show dependency chain\n";
+            cout << "10. Undo last action\n";
+            cout << "11. Calendar View\n";
+            cout << "0. Exit\n";
+            cout << "Enter choice: ";
+            cin >> choice;
+
+            switch (choice) {
+                case 1: addEvent(); break;
+                case 2: deleteEvent(); break;
+                case 3: viewEventsOnDate(); break;
+                case 4: viewAllEvents(); break;
+                case 5: viewEventsSortedByDate(); break;
+                case 6: searchByTitle(); break;
+                case 7: buildAndShowUpcoming(); break;
+                case 8: addDependency(); break;
+                case 9: showDependenciesBFS(); break;
+                case 10: undoLast(); break;
+                case 11: showMonthView(); break;
+                case 0: cout << "Goodbye.\n"; break;
+                default: cout << "Invalid choice.\n"; break;
+            }
+        }
+    }
+};
+
+int main() {
+    CalendarSystem calendar;
+    calendar.menu();
+    return 0;
+}
